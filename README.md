@@ -11,5 +11,9 @@ Windows version
 
 http://info.readerlyapp.com/wp-content/uploads/2015/07/LitFeederWindows.zip
 
+Website
+
+http://info.readerlyapp.com/litfeeder/
+
 Sean Miller
 sean@readerlyapp.com
