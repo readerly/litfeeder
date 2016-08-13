@@ -1,0 +1,514 @@
+﻿script "litfeeder-sample-script"
+global gWords
+global gTweet
+global gRequestToken
+global gAccessToken
+global gAccessTokenSecret
+global gBrowserID
+global gScreenName
+global gUserID
+global gRequestToken
+global gRequestTokenSecret
+global gAccessTokenURL
+global gVerifier
+global gMessageID
+local tBrowserURL
+// global gTweetingOn
+
+on openStack
+    set the label of button "startFeed" to "Start Feed"
+    set the label of button "login" to "Login"
+    put empty into field "handle"
+   set the htmlText of field "credits" to "Brought to you by the folks at <font color='#8a451c'>Readerly</font>."
+   put empty into field "oauthDance"
+   
+   put specialFolderPath("documents") & "/LitFeederTest" into tFolderPath
+   create folder tFolderPath
+   put specialFolderPath("documents") & "/LitFeederTest/litfeeder_text.txt" into tFilePath
+   put URL("file:" & tFilePath) into field "text"
+   put specialFolderPath("documents") & "/LitFeederTest/litfeeder_log.txt" into tFilePath
+   put URL("file:" & tFilePath) into field "fldTweets"
+   
+   if field "text" is not empty then
+      set the visible of field "text" to true
+      set the label of button "loadText" to "Clear Text"
+      if field "fldTweets" is not empty then
+         set the visible of field "fldTweets" to true
+      else
+         set the visible of field "fldTweets" to false
+         end if
+   else
+      set the visible of field "text" to false
+               set the visible of field "fldTweets" to false
+      set the label of button "loadText" to "Choose Text"
+      end if      
+end openStack
+
+on closeStackRequest 
+   answer "Are you sure your want to close LitFeeder?" with "Yes" or "Cancel"
+   if it is "Yes" then pass closeStackRequest 
+end closeStackRequest
+
+// closeStack isn't saving the text or log; put saveTextAndLog handler at end of postTweet handler
+/*
+on closeStack
+   put specialFolderPath("documents") & "/litfeeder_text.txt" into tFilePath
+   delete file tFilePath
+   put field "text" into URL("file:" & tFilePath)
+   put specialFolderPath("documents") & "/litfeeder_log.txt" into tFilePath
+   delete file tFilePath
+   put field "fldTweets" into URL("file:" & tFilePath)
+end closeStack
+*/
+
+// loads complete sentences into tweet variable
+on putSentencesIntoTweetVariable
+         put the number of sentences of field "tweet" into tSentences
+      if tSentences = 1 then
+         put sentence 1 of field "tweet" into gTweet
+      else if tSentences = 2 then
+         put sentence 1 of field "tweet" into gTweet
+         else
+            put sentence 1 to (tSentences - 1) of field "tweet" into gTweet
+            end if
+end putSentencesIntoTweetVariable
+
+// loads the first 140 characters of the text in complete sentence chunks into the tweet variable
+on prepareTweet
+   
+   put character 1 to 140 of field "text" into field "tweet"
+   replace return with space in field "tweet"
+
+   if field "tweet" contains "." then
+   putSentencesIntoTweetVariable
+   else if field "tweet" contains "?" then
+putSentencesIntoTweetVariable
+   else if field "tweet" contains "!" then
+putSentencesIntoTweetVariable
+   else
+      put word 1 to 25 of field "text" into gTweet
+      replace return with space in gTweet
+   put the number of characters of gTweet into tChars
+   
+   repeat with x = the number of words of gTweet down to 1
+      if tChars > 140 then
+         delete the last word of gTweet
+         put the number of characters of gTweet into tChars
+      else 
+         exit repeat
+         end if
+      end repeat
+      send postTweetWithRestOfSentence to me in 60 seconds
+   end if
+   
+end prepareTweet
+
+// stores the access token delivered by Step 3 of the OAuth dance
+on storeAccessToken
+   set the itemDel to "&"
+   put item 1 gAccessTokenURL into gAccessToken
+   delete character 1 to 12 of gAccessToken
+   put item 2 of gAccessTokenURL into gAccessTokenSecret
+   delete character 1 to 19 of gAccessTokenSecret
+   put item 3 of gAccessTokenURL into gUserID
+   delete character 1 to 8 of gUserID
+   put item 4 of gAccessTokenURL into gScreenName
+   delete character 1 to 12 of gScreenName
+   put "@" & gScreenName into field "handle"
+end storeAccessToken
+
+on getTwitterFeed
+   put twitter.get("1.1/statuses/user_timeline.json?screen_name=" & gScreenName & "&count=10&include_rts=false&exclude_replies=true") & return before field "fldTweets"
+end getTwitterFeed
+
+//posts a tweet to the user's twitter account
+local tPostResult
+
+on postTweet
+   if gTweet is not empty then
+            
+      put twitter.post("1.1/statuses/update.json?status=" & twitter.URLEncode(gTweet)) into tPostResult
+      put tPostResult & return before field "oauthDance"
+      
+      if tPostResult contains "created_at" then
+         set the visible of field "fldTweets" to true
+               put the date && the time && gTweet & return & return before the field "fldTweets"
+               put the number of words in gTweet into gWords
+               delete word 1 to gWords of field "text"
+               send startTweeting to me in 1800 seconds
+               put the result into gMessageID
+               
+               if field "text" is empty then
+               cancel item 1 of the last line of the pendingMessages
+                  answer "You've posted the entire text to Twitter."
+                  set the visible of field "text" to false
+                  set the label of button "loadText" to "Choose Text"
+                  set the label of button "startFeed" to "Start Feed"
+                  end if
+               
+               else if tPostResult contains "duplicate" then
+                  put the number of words in gTweet into gWords
+                  delete word 1 to gWords of field "text"
+                  send startTweeting to me in 15 seconds
+               // answer "You already posted the same tweet to Twitter."
+            else if tPostResult contains "errors" then
+               set the label of button "login" to "Login"
+               // set the visible of field "oauthDance" to true
+               answer "There was a problem posting your tweet to Twitter. Try logging in again and reposting."
+            else
+               send postTweet to me in 5 seconds
+      end if
+   end if
+   // put "gTweet:" && gTweet & return before field "oauthDance"
+   // put the pendingMessages & return before field "oauthDance"
+   saveTextAndLog
+end postTweet
+
+on postTweetWithRestOfSentence
+   prepareTweet
+   postTweet
+   cancel gMessageID
+end postTweetWithRestOfSentence
+
+
+//cleans up the text -- commented out on startFeed button
+on scrubText
+   repeat for 10 times 
+      replace return & return with return in field "text"
+      end repeat
+   replace return with space in field "text"
+   // replace "<p>" with return & return in field "text"
+end scrubText
+
+// collects and posts tweets at regular intervals
+on startTweeting
+         prepareTweet
+         postTweet
+         set the label of button "startFeed" to "Stop Feed"
+         focus on field "text"
+end startTweeting
+
+on tweetLater
+   if tPostResult contains "created_at" then
+            set the label of button "startFeed" to "Stop Feed"
+            send startTweeting to me in 1800 seconds
+            end if
+end tweetLater
+
+on repostTweet
+   postTweet
+   // tweetLater
+end repostTweet
+
+//loads the tokens & keys into the OAuth signing array
+on connectTwitter
+   local tOAT -- oauth_access_token
+   local tOATS -- oauth_access_token_secret
+   local tCK -- consumer_key
+   local tCS -- consumer_secret
+   put empty into gRequestToken
+   put empty into gAccessToken
+   put empty into gAccessTokenSecret
+   put empty into gUserID
+   put empty into gScreenName
+   put empty into gVerifier
+   // put "" into field "fldTweets"
+   put empty into field "oauthDance"
+   put "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" into tOAT
+   put "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" into tOATS
+   put "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" into tCK
+   put "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" into tCS
+   twitter.set tOAT, tOATS, tCK, tCS
+end connectTwitter
+
+on goToTwitterSite
+   if gBrowserID is empty then
+      put the windowid of this stack into tID
+      put "http://twitter.com/logout" into tLogoutURL
+  put revBrowserOpen(tID,tLogoutURL) into gBrowserID
+  revBrowserSet gBrowserID,"rect", "0,95,640,775"
+  revBrowserSet gBrowserID,"url",tLogoutURL
+ else
+   revBrowserSet gBrowserID, "visible", true
+   revBrowserSet gBrowserID,"url", "http://twitter.com/logout"
+   set the label of button "login" to "Login"
+   end if
+end goToTwitterSite
+
+// Step 1 in the OAuth dance
+on requestToken
+   put twitter.post("oauth/request_token") into gRequestToken
+   put gRequestToken before field "oauthDance"
+   set itemDel to "&"
+   put item 2 of gRequestToken into gRequestTokenSecret
+   delete character 1 to 19 of gRequestTokenSecret
+   delete item 2 to 3 of gRequestToken
+   delete character 1 to 12 of gRequestToken
+end requestToken
+
+local tURL
+// local tToken
+// local tVerifier
+local tSecret
+
+//Step 2 in the OAuth dance
+on openBrowser
+   if gBrowserID is not empty then
+      revBrowserSet gBrowserID,"rect", "0,93,640,618"
+      revBrowserSet gBrowserID,"url",tBrowserURL
+      else
+  put the windowid of this stack into tID
+  put revBrowserOpen(tID,tBrowserURL) into gBrowserID
+  revBrowserSet gBrowserID,"rect", "0,93,640,618"
+  revBrowserSet gBrowserID,"url",tBrowserURL
+  end if
+end openBrowser
+
+on permitAccess
+            
+   libURLFollowHttpRedirects true
+   put "https://api.twitter.com/oauth/authenticate?oauth_token=" & gRequestToken into tBrowserURL
+   
+   openBrowser
+   // set the label of button "login" to "Logout"
+   checkLoginStatus
+   
+end permitAccess
+
+local tLoginCheckSendID
+
+on checkLoginStatus
+   if gBrowserID is not empty then
+      put revBrowserGet (gBrowserID, "url") into tRedirectURL
+      if tRedirectURL contains "readerlyapp" then
+         set the label of button "login" to "Logout"
+         cancel tLoginCheckSendID
+      else if tRedirectURL contains "twitter" then
+         send checkLoginStatus to me in 1 second
+         put the result into tLoginCheckSendID
+         else
+            send checkLoginStatus to me in 1 second
+            put the result into tLoginCheckSendID
+     end if
+     end if
+end checkLoginStatus
+
+
+//scrapes the oauth_verifier from OAuth Step 2 redirect URL
+on getRedirectURL
+   if gBrowserID is not empty then
+      put revBrowserGet (gBrowserID, "url") into tRedirectURL
+   if tRedirectURL contains "readerlyapp" then
+      set itemDel to "&"
+      put item 2 of tRedirectURL into gVerifier
+      delete character 1 to 15 of gVerifier
+        put tRedirectURL & return before field "oauthDance"
+     else
+        // wait 3 seconds with messages
+      // send getRedirectURL to me in 3000 milliseconds
+     end if
+     end if
+     closeLoginBrowser
+end getRedirectURL
+
+on closeLoginBrowser
+   if gBrowserID is not empty then
+      put revBrowserInstances() into tInstances
+      repeat for each item tInstance in tInstances
+         revBrowserClose tInstance
+end repeat
+      put empty into gBrowserID
+      end if
+end closeLoginBrowser 
+
+// executes Step 3 of the OAuth dance; swaps the request token for the user's access token
+on getAccessToken
+   put gRequestTokenSecret into sTwitter["oauth_access_token_secret"]
+   
+   put twitter.post("oauth/access_token?oauth_verifier=" & gVerifier) into gAccessTokenURL
+   put gAccessTokenURL & return before field "oauthDance"
+end getAccessToken
+
+local sTwitter
+
+private function arrayMerge pArray1,pArray2
+   local pArray
+   put pArray1 into pArray
+   repeat for each line tKey in the keys of pArray2
+      put pArray2[tKey] into pArray[tKey]
+   end repeat
+   return pArray
+end arrayMerge
+
+private function buildBaseString pBaseUrl, pMethod,pParams
+   local tResult
+   get the keys of pParams
+   sort lines of it
+   repeat for each line tKey in it
+      put tKey & "%3D" & urlEncode(pParams[tKey]) & "%26" after tResult
+   end repeat
+   put char 1 to -4 of tResult into tResult
+   return pMethod & "&" & urlEncode(pBaseUrl) & "&" & tResult
+end buildBaseString
+
+private function hmacSha1 pMsg, pKey
+   if length(pKey) > 64 then put sha1digest(pKey) into pKey
+   repeat 64 - length(pKey)
+      put null after pKey
+   end repeat
+   repeat for each byte c in pKey
+      put numtobyte(bytetonum(c) bitXor 54) after ipad
+      put numtobyte(bytetonum(c) bitXor 92) after opad
+   end repeat
+   return sha1digest(opad & sha1digest(ipad & pMsg))
+end hmacSha1
+
+private function buildAuthorizationHeader pOAuth
+   local tResult
+   put "Authorization: OAuth " into tResult
+   repeat for each line tKey in the keys of pOAuth
+      put tKey & "=" & quote & urlencode(pOAuth[tKey]) & quote & comma & space after tResult
+   end repeat
+   return char 1 to -3 of tResult
+end buildAuthorizationHeader
+
+on twitter.set pOAT, pOATS, pCK, pCS
+   put pOAT into sTwitter["oauth_access_token"]
+   put pOATS into sTwitter["oauth_access_token_secret"]
+   put pCK into sTwitter["consumer_key"]
+   put pCS into sTwitter["consumer_secret"]
+   put "https://api.twitter.com/" into sTwitter["base_url"]
+end twitter.set
+
+private function twitter.http pMethod, pUrl
+   local tUrlParts
+   put pUrl into tUrlParts
+   split tUrlParts by "?"
+   -- tUrlParts[1] : path, tUrlParts[2]: query
+   
+   local tUrlArguments
+   put tUrlParts[2] into tUrlArguments
+   split tUrlArguments by "&" and "="
+   
+   local tFullUrl
+   put sTwitter["base_url"] & pUrl into tFullUrl
+   
+   local tBaseUrl
+   put  sTwitter["base_url"] & tUrlParts[1] into tBaseUrl
+   
+   local tTime
+   put the internet date into tTime
+   convert tTime to seconds
+   
+   local tOAuth
+   put "1.0" into tOAuth["oauth_version"]
+   put sTwitter["consumer_key"] into tOAuth["oauth_consumer_key"]
+   put tTime into tOAuth["oauth_nonce"]
+   put "HMAC-SHA1" into tOAuth["oauth_signature_method"]
+   
+   if gRequestToken is empty then
+   put sTwitter["oauth_access_token"] into tOAuth["oauth_token"]
+   // answer tOAuth["oauth_token"]
+else if gAccessToken is empty then
+   put gRequestToken into tOAuth["oauth_token"]
+   // answer tOAuth["oauth_token"]
+else
+   put gAccessToken into tOAuth["oauth_token"]
+   put gAccessTokenSecret into sTwitter["oauth_access_token_secret"]
+   end if
+   
+   put tTime into tOAuth["oauth_timestamp"]
+   
+   local tBaseInfo
+   put buildBaseString(tBaseUrl,pMethod,arrayMerge(tOAuth,tUrlArguments)) into tBaseInfo
+   
+   local tCompositeKey
+   put urlEncode(sTwitter["consumer_secret"]) & "&" & urlEncode(sTwitter["oauth_access_token_secret"]) into tCompositeKey
+   put base64Encode(hmacSha1( tBaseInfo, tCompositeKey)) into tOAuth["oauth_signature"]
+   set the httpHeaders to buildAuthorizationHeader(tOAuth)
+   if pMethod is "POST" then
+      post "" to url(tFullUrl)
+   else
+      get url(tFullUrl)
+   end if
+   return it
+end twitter.http
+
+function twitter.get pUrl
+   return twitter.http("GET", pUrl)
+end twitter.get
+
+function twitter.post pUrl
+   return twitter.http("POST", pUrl)
+end twitter.post
+
+function twitter.URLEncode pText
+   local tText
+   put urlEncode(pText) into tText
+   replace "+" with "%20" in tText
+   return tText
+end twitter.URLEncode
+
+on chooseText
+   if gBrowserID is not empty then
+      revBrowserSet gBrowserID, "visible", false
+   end if
+   if field "text" is empty then
+   answer file "Select a text file"
+if it <> "" then
+put it into tFilePath
+put URL ("file:" & tFilePath) into field "text"
+// put uniEncode("file:" & tFilePath, "UTF8") into tUnicodeText
+   // set the unicodeText of field "text" to tUnicodeText
+set the visible of field "text" to true
+   // set the label of button "loadText" to "Load Text"
+   // set the rect of field "text" to 0,95,640,435
+   set the vScrollbar of field "text" to true
+   set the label of button "loadText" to "Clear Text"
+else
+--no file was selected, or cancel was pressed
+beep
+end if
+else
+   set the visible of field "text" to true
+   set the label of button "loadText" to "Clear Text"
+end if
+
+end chooseText
+
+on loadText
+   put field "text" into tTextURL
+   // set the rect of field "text" to 0,95,640,435
+   get URL tTextURL
+   put uniEncode( URL tTextURL, "UTF8") into tUnicodeText
+   set the unicodeText of field "text" to tUnicodeText
+   set the vScrollbar of field "text" to true
+   set the label of button "loadText" to "Choose Text"
+end loadText
+
+on saveTextAndLog
+   put specialFolderPath("documents") & "/LitFeederTest/litfeeder_text.txt" into tFilePath
+   delete file tFilePath
+   put field "text" into URL("file:" & tFilePath)
+   put specialFolderPath("documents") & "/LitFeederTest/litfeeder_log.txt" into tFilePath
+   delete file tFilePath
+   put field "fldTweets" into URL("file:" & tFilePath)
+end saveTextAndLog
+
+/*
+on postAccessSession
+   put "user_id=" & urlEncode(gUserID) & "&screen_name=" & urlEncode(gScreenName) & "&oauth_token=" \
+   & urlEncode(gAccessToken) & "&oauth_token_secret=" & urlEncode(gAccessTokenSecret) into tLoginArgument
+   post tLoginArgument to URL "http://readerly.on-rev.com/twitter_login.lc"
+end postAccessSession
+
+on loadText
+   put "user_id=" & urlEncode(gUserID) & "&text_feed=" & urlEncode(field "text") into tTextArgument
+   post tTextArgument to URL "http://readerly.on-rev.com/twitter_load.lc"
+end loadText
+
+on startTweetFeed
+   put "user_id=" & urlEncode(gUserID) into tStartArgument
+   post tStartArgument to URL "http://readerly.on-rev.com/twitter_feed.lc"
+end startTweetFeed
+*/
